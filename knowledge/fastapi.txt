@@ -1,0 +1,5 @@
+FastAPI is a modern Python framework for building APIs.
+FastAPI supports HTTP methods such as GET, POST, PUT and DELETE.
+FastAPI uses Pydantic for request data validation.
+FastAPI automatically generates interactive API documentation.
+FastAPI can be used to build REST APIs.
