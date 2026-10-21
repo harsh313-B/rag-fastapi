@@ -69,6 +69,13 @@ def ask_rag(question: str):
         2
     )
 
+    #  Reject questions with insufficiently relevant context
+    if distances[0][0] > 1.0:
+        return (
+            "I don't know based on the available knowledge.",
+            []
+        )
+
     # Retrieve matching chunks
     retrieved_chunks = [
         chunks[idx]
