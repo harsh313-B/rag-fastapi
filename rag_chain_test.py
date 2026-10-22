@@ -11,10 +11,21 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 # 1. Load the knowledge document
 document_path = Path("knowledge/fastapi.txt")
-documents = TextLoader(
+loaded_documents = TextLoader(
     str(document_path),
     encoding="utf-8",
 ).load()
+
+from langchain_core.documents import Document
+
+documents = [
+    Document(
+        page_content=line.strip(),
+        metadata=loaded_documents[0].metadata,
+    )
+    for line in loaded_documents[0].page_content.splitlines()
+    if line.strip()
+]
 
 
 # 2. Create embeddings and the FAISS vector store
