@@ -1,93 +1,81 @@
+
 from pathlib import Path
 
-from sentence_transformers import SentenceTransformer
-import faiss
+from langchain_core.documents import Document
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnableLambda
+from langchain_community.document_loaders import TextLoader
+from langchain_community.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 
 # 1. Load the knowledge document
+document_path = Path(__file__).parent / "knowledge" / "fastapi.txt"
 
-document_path = Path("knowledge/fastapi.txt")
+loaded_documents = TextLoader(
+    str(document_path),
+    encoding="utf-8",
+).load()
 
-text = document_path.read_text()
 
-
-# 2. Create chunks
-
-chunks = [
-    line.strip()
-    for line in text.splitlines()
+# 2. Split the document into individual facts
+documents = [
+    Document(
+        page_content=line.strip(),
+        metadata=loaded_documents[0].metadata,
+    )
+    for line in loaded_documents[0].page_content.splitlines()
     if line.strip()
 ]
 
 
-# 3. Load embedding model
+# 3. Create embeddings and the FAISS vector store
+embedding_model = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
 
-embedding_model = SentenceTransformer(
-    "sentence-transformers/all-MiniLM-L6-v2"
+vector_store = FAISS.from_documents(
+    documents,
+    embedding_model,
 )
 
 
-# 4. Create embeddings
+# 4. Load FLAN-T5
+model_name = "google/flan-t5-small"
 
-embeddings = embedding_model.encode(chunks)
-
-
-# 5. Create FAISS index
-
-dimension = embeddings.shape[1]
-
-index = faiss.IndexFlatL2(dimension)
-
-index.add(embeddings)
+llm_tokenizer = AutoTokenizer.from_pretrained(model_name)
+llm_model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
 
-# 6. Load the LLM
+# 5. Connect FLAN-T5 to LangChain
+def generate_answer(prompt_value) -> str:
+    prompt_text = prompt_value.to_string()
 
-llm_tokenizer = AutoTokenizer.from_pretrained(
-    "google/flan-t5-small"
-)
-
-llm_model = AutoModelForSeq2SeqLM.from_pretrained(
-    "google/flan-t5-small"
-)
-
-
-# 7. RAG function
-
-def ask_rag(question: str):
-
-    # Convert question into an embedding
-    query_embedding = embedding_model.encode(
-        [question]
+    inputs = llm_tokenizer(
+        prompt_text,
+        return_tensors="pt",
     )
 
-    # Search FAISS
-    distances, indices = index.search(
-        query_embedding,
-        2
+    outputs = llm_model.generate(
+        **inputs,
+        max_new_tokens=50,
     )
 
-    #  Reject questions with insufficiently relevant context
-    if distances[0][0] > 1.0:
-        return (
-            "I don't know based on the available knowledge.",
-            []
-        )
+    return llm_tokenizer.decode(
+        outputs[0],
+        skip_special_tokens=True,
+    )
 
-    # Retrieve matching chunks
-    retrieved_chunks = [
-        chunks[idx]
-        for idx in indices[0]
-    ]
 
-    # Combine retrieved chunks
-    context = "\n".join(retrieved_chunks)
+llm = RunnableLambda(generate_answer)
 
-    # Create prompt
-    prompt = f"""
-Answer the question using only the provided context.
+
+# 6. Define the prompt
+prompt = PromptTemplate.from_template(
+    """Answer the question using only the provided context.
+If the answer is not present, say "I don't know".
 
 Context:
 {context}
@@ -95,25 +83,43 @@ Context:
 Question:
 {question}
 
-Answer:
-"""
+Answer:"""
+)
 
-    # Tokenize
-    inputs = llm_tokenizer(
-        prompt,
-        return_tensors="pt"
+
+# 7. Build the answer chain
+answer_chain = prompt | llm
+
+RELEVANCE_THRESHOLD = 1.0
+
+
+# 8. Retrieve, check relevance, and answer
+def ask_rag(question: str):
+    results = vector_store.similarity_search_with_score(
+        question,
+        k=2,
     )
 
-    # Generate answer
-    outputs = llm_model.generate(
-        **inputs,
-        max_new_tokens=50
-    )
+    if not results or results[0][1] > RELEVANCE_THRESHOLD:
+        return (
+            "I don't know based on the available knowledge.",
+            [],
+        )
 
-    # Convert tokens to text
-    answer = llm_tokenizer.decode(
-        outputs[0],
-        skip_special_tokens=True
-    )
+    retrieved_documents = [
+        document for document, score in results
+    ]
 
-    return answer, retrieved_chunks
+    sources = [
+        document.page_content
+        for document in retrieved_documents
+    ]
+
+    context = "\n\n".join(sources)
+
+    answer = answer_chain.invoke({
+        "context": context,
+        "question": question,
+    })
+
+    return answer, sources

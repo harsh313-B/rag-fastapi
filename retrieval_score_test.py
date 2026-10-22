@@ -1,5 +1,5 @@
 
-from rag_engine import embedding_model, index, chunks
+from rag_engine import vector_store
 
 questions = [
     "What validates FastAPI request data?",
@@ -7,11 +7,13 @@ questions = [
 ]
 
 for question in questions:
+    results = vector_store.similarity_search_with_score(
+        question,
+        k=2,
+    )
+
     print(f"\nQuestion: {question}")
 
-    query_embedding = embedding_model.encode([question])
-    distances, indices = index.search(query_embedding, 2)
-
-    for distance, idx in zip(distances[0], indices[0]):
-        print(f"Squared L2 distance: {distance:.4f}")
-        print(f"Text: {chunks[idx]}")
+    for document, score in results:
+        print(f"Squared L2 distance: {score:.4f}")
+        print(f"Text: {document.page_content}")

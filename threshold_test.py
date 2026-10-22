@@ -1,6 +1,5 @@
-from rag_engine import embedding_model, index, chunks
 
-THRESHOLD = 1.0
+from rag_engine import vector_store, RELEVANCE_THRESHOLD
 
 questions = [
     "What validates FastAPI request data?",
@@ -8,15 +7,19 @@ questions = [
 ]
 
 for question in questions:
-    query_embedding = embedding_model.encode([question])
-    distances, indices = index.search(query_embedding, 2)
+    results = vector_store.similarity_search_with_score(
+        question,
+        k=2,
+    )
 
     print(f"\nQuestion: {question}")
 
-    if distances[0][0] > THRESHOLD:
+    if not results or results[0][1] > RELEVANCE_THRESHOLD:
         print("Decision: Reject — insufficiently relevant context")
         continue
 
     print("Decision: Accept — pass context to the LLM")
-    for idx in indices[0]:
-        print(f"- {chunks[idx]}")
+
+    for document, score in results:
+        print(f"Distance: {score:.4f}")
+        print(f"Text: {document.page_content}")

@@ -117,3 +117,21 @@ def ask_rag(question: str):
     answer = rag_chain.invoke(question)
 
     return answer, sources
+
+# 9. Inspect retrieval scores
+test_questions = [
+    "What validates FastAPI request data?",
+    "Who invented Python?",
+]
+
+for question in test_questions:
+    results = vector_store.similarity_search_with_score(
+        question,
+        k=2,
+    )
+
+    print(f"\nQuestion: {question}")
+
+    for document, score in results:
+        print(f"Squared L2 distance: {score:.4f}")
+        print(f"Text: {document.page_content}")
